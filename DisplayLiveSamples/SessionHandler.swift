@@ -16,7 +16,6 @@ class SessionHandler : NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, A
     let wrapper = DlibWrapper()
     
     var currentMetadata: [AnyObject]
-    
     override init() {
         currentMetadata = []
         super.init()
@@ -52,6 +51,38 @@ class SessionHandler : NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, A
         
         let settings: [AnyHashable: Any] = [kCVPixelBufferPixelFormatTypeKey as AnyHashable: Int(kCVPixelFormatType_32BGRA)]
         output.videoSettings = settings as! [String : Any]
+        
+        /***************************************************************************/
+        //fpsをあげるためのルーチン
+        var minFPS = 0.0
+        var maxFPS = 0.0
+        var maxWidth:Int32 = 0
+        var selectedFormat:AVCaptureDevice.Format? = nil
+        for format in (device.formats){
+            for range in format.videoSupportedFrameRateRanges{
+                let desc = format.formatDescription
+                let dimentions = CMVideoFormatDescriptionGetDimensions(desc)
+                
+                if(minFPS <= range.minFrameRate && maxFPS <= range.maxFrameRate && maxWidth <= dimentions.width){
+                    minFPS = range.minFrameRate
+                    maxFPS = range.maxFrameRate
+                    maxWidth = dimentions.width
+                    selectedFormat = format
+                }
+            }
+        }
+        
+        do{
+            try device.lockForConfiguration()
+            device.activeFormat = selectedFormat!
+            device.activeVideoMinFrameDuration = CMTimeMake(1,Int32(minFPS))
+            device.activeVideoMaxFrameDuration = CMTimeMake(1,Int32(maxFPS))
+            device.unlockForConfiguration()
+        }catch{
+            
+        }
+        
+        /***************************************************************************/
     
         // availableMetadataObjectTypes change when output is added to session.
         // before it is added, availableMetadataObjectTypes is empty
@@ -67,11 +98,11 @@ class SessionHandler : NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, A
 
         if !currentMetadata.isEmpty {
             let boundsArray = currentMetadata
-                .flatMap { $0 as? AVMetadataFaceObject }
+                .compactMap { $0 as? AVMetadataFaceObject }//ダウンキャストできないとnilが帰ってくる->nilはmapが弾いてくれる。
                 .map { (faceObject) -> NSValue in
                     let convertedObject = output.transformedMetadataObject(for: faceObject, connection: connection)
                     return NSValue(cgRect: convertedObject!.bounds)
-            }
+                }
             
             wrapper?.doWork(on: sampleBuffer, inRects: boundsArray)
         }
@@ -87,5 +118,6 @@ class SessionHandler : NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, A
     
     func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput metadataObjects: [AVMetadataObject], from connection: AVCaptureConnection) {
         currentMetadata = metadataObjects as [AnyObject]
+        print(currentMetadata)
     }
 }
